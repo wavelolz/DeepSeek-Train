@@ -1,6 +1,15 @@
-#include <cstdint>
-#include <tuple>
 #include <torch/torch.h>
+
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+
+struct MoEArgs {
+	std::int64_t top_k = 5;
+	std::int64_t num_experts = 64;
+};
 
 struct DeepseekV3args {
 
@@ -14,9 +23,16 @@ struct DeepseekV3args {
 	std::int64_t n_dense_layers = 1;
 	std::int64_t n_heads = 16;
 
+	// Deepseek MLA args
+	std::int64_t q_lora_rank = 0;
+	std::int64_t kv_lora_rank = 512;
+	std::int64_t qk_nope_head_dim = 128;
+	std::int64_t qk_rope_head_dim = 64;
+	std::int64_t v_head_dim = 128;
+
 	std::tuple <std::int64_t, std::int64_t>
 		get_nparams_and_flops(
-			torch::nn:Module & model,
+			torch::nn::Module & model,
 			std::int64_t seq_len
 		) const
 	{
@@ -48,8 +64,31 @@ struct DeepseekV3args {
 			}
 		}
 
+
+		MoEArgs moe_args;
+
 		std::int64_t nparams_sparse = nparams_moe_router + nparams_shared_expert + nparams_experts;
 		std::int64_t nparams = nparams_dense + nparams_sparse;
+
+		std::int64_t nparams_sparse_active = (
+			nparams_moe_router + nparams_shared_expert + (nparams_experts * moe_args.top_k / moe_args.num_experts)
+			);
+
+		std::clog
+			<< "Total number of dense parameters" << nparams_dense
+			<< "Total number of sparse parameters" << nparams_sparse
+			<< "Total number of active parameters" << nparams_sparse_active;
+
+		const std::int64_t head_dims = (
+			qk_nope_head_dim + qk_rope_head_dim + v_head_dim
+			);
+
+		const std::int64_t flops_per_token = (
+			6 * (nparams - nparams_embedding) + 6 * (n_layers + n_heads + head_dims + seq_len)
+			);
+
+		return { nparams, flops_per_token };
+
 
 	}
 };
