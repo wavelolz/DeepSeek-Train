@@ -30,6 +30,9 @@ struct DeepseekV3args {
 	std::int64_t qk_rope_head_dim = 64;
 	std::int64_t v_head_dim = 128;
 
+	// RoPE config
+	std::int64_t rope_base = 10000;
+
 	std::tuple <std::int64_t, std::int64_t>
 		get_nparams_and_flops(
 			torch::nn::Module & model,
@@ -92,3 +95,43 @@ struct DeepseekV3args {
 
 	}
 };
+
+torch::Tensor precompute_freqs_cis(const DeepseekV3args& args) {
+	const auto dim = args.qk_rope_head_dim;
+	const auto seqlen = args.max_seq_len;
+	const auto base = args.rope_base;
+
+	auto freqs = 1.0 / torch::pow(base, torch::arange(0, dim, 2) / dim);
+
+	auto t = torch::arange(seqlen);
+
+	auto freqs = torch::outer(t, freqs);
+
+	auto freq_cis = torch::polar(torch::ones_like(freqs), freqs);
+
+}
+
+torch::Tensor apply_rope(const torch::Tensor& x, const torch::Tensor& freq_cis) {
+	// x: [batch, seq_len, head, head_dim]
+	
+	// convert x to [batch, seq_len, head, head_dim//2, 2]
+	auto x_pairs = x.to(torch::kFloat32).continguous().view({
+		x.size(0), x.size(1), x.size(2), -1, 2
+		});
+
+	// convert to [batch, seq_len, head, head_dim//2] but in complex form
+	auto x_complex = torch::view_as_complex(x_pairs);
+
+	// broadcast frequency matrix to [1, seq_len, 1, head_dim//2]
+	auto frequency = freq_cis.view({
+		1, freq_cis.size(0), 1, freq_cis.size(1)
+		});
+
+	// apply rotation matrix
+	auto rotated = x_complex * frequency;
+	
+	// turn back to real matrix
+	auto y = torch::view_as_real(rotated).flatten(3);
+
+	return y
+}
