@@ -33,6 +33,9 @@ struct DeepseekV3args {
 	// RoPE config
 	std::int64_t rope_base = 10000;
 
+	// YaRN args
+	std::int64_t original_seq_len = 4096;
+
 	std::tuple <std::int64_t, std::int64_t>
 		get_nparams_and_flops(
 			torch::nn::Module & model,
@@ -101,7 +104,47 @@ torch::Tensor precompute_freqs_cis(const DeepseekV3args& args) {
 	const auto seqlen = args.max_seq_len;
 	const auto base = args.rope_base;
 
+
+	// calculate basic RoPE angle
 	auto freqs = 1.0 / torch::pow(base, torch::arange(0, dim, 2) / dim);
+
+	double find_correction_val(
+		double rotations,
+		std::int64_t original_context_length,
+		std::int64_t dim,
+		double base
+	) {
+		// calculate frequency based on rotations
+		return dim * (std::log(original_context_length / (2.0 * std::numbers::pi * rotations))) / (2.0 * std::log(base));
+	}
+	std::pair<std::int64_t, std::int64_t> find_correction_range(
+		double beta_fast,
+		double beta_slow,
+		std::int64_t original_context_length,
+		std::int64_t dim,
+		double base
+	) {
+		low = std::floor(find_correction_val(beta_fast, original_context_length, dim, base)); // calculate alpah
+		high = std::ceil(find_correction_val(beta_slow, original_context_length, dim, base)); // calculate beta
+
+		low = std::max(low, 0);
+		high = std::min(high, dim - 1);
+
+		return {low, high};
+
+		)
+	}
+	torch::Tensor linear_ramp_function(double low, double high, std::int64_t dim) {
+		auto index = (torch::arange(dim) - low) / (high - low);
+		return torch::clamp(index, 0.0, 1.0);
+	}
+
+	if (seqlen > args.original_seq_len) {
+
+
+		smooth = 1 - linear_ramp_function(low, high, dim / 2)
+		freqs = freqs / scale * (1 - smooth) + smooth * freqs;
+	}
 
 	auto t = torch::arange(seqlen);
 
