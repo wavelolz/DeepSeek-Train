@@ -42,10 +42,3 @@ struct DeepseekV3args {
 		std::int64_t seq_len
 	) const;
 };
-
-torch::Tensor precompute_freqs_cis(const DeepseekV3args& args);
-
-torch::Tensor apply_rope(
-	const torch::Tensor& x,
-	const torch::Tensor& freq_cis
-);
